@@ -19,6 +19,11 @@
 #define HEX_PERIOD_MS          16
 #define HEX_SQRT3             1.7320508075688772f
 
+#define HEX_TAU_MS          260.0f   /* 惯性时间常数 */
+#define HEX_V_SNAP           12.0f   /* 低于此速度转入吸附，px/s */
+#define HEX_OMEGA            12.0f   /* 弹簧角频率 rad/s */
+#define HEX_VEL_EMA           0.35f  /* 拖拽测速的指数滑动平均系数 */
+
 /* Montserrat 12..48 步进 2，共 19 档。lv_conf.h 中已全部开启。 */
 static const lv_font_t * const HEX_FONTS[] = {
     &lv_font_montserrat_12, &lv_font_montserrat_14, &lv_font_montserrat_16,
@@ -44,6 +49,13 @@ typedef struct {
     lv_opa_t   last_opa;
 } hex_cell_t;
 
+typedef enum {
+    HEX_ST_IDLE,
+    HEX_ST_DRAG,
+    HEX_ST_GLIDE,
+    HEX_ST_SNAP,
+} hex_state_t;
+
 typedef struct {
     const lv_hex_menu_item_t * items;
     uint32_t                   item_cnt;
@@ -53,6 +65,15 @@ typedef struct {
     float fx, fy;      /* 焦点世界坐标 */
     float vx, vy;      /* 速度 px/s */
     float s;           /* 当前网格尺寸 */
+
+    hex_state_t state;
+    lv_point_t  last_pt;      /* 上一帧指针位置 */
+    lv_point_t  press_pt;     /* 按下时的指针位置 */
+    uint32_t    press_tick;
+    uint32_t    press_last_tick;   /* 仅供 PRESSING 测速使用，与定时器的 last_tick 互不干扰 */
+    int32_t     press_travel; /* 按下期间累计位移，用于区分点击与拖拽 */
+    float       target_x;     /* 吸附目标 */
+    float       target_y;
 
     int32_t focus_slot;
 
@@ -187,6 +208,60 @@ static void hex_layout(lv_obj_t * obj)
     }
 }
 
+/* ------------------ 物理状态机 ------------------ */
+
+static void hex_pick_snap_target(hex_menu_ctx_t * m)
+{
+    hex_axial_t a = hex_px_to_axial(m->fx, m->fy, m->s);
+    hex_axial_to_px(a, m->s, &m->target_x, &m->target_y);
+}
+
+static void hex_physics_update(hex_menu_ctx_t * m, float dt, float dt_ms)
+{
+    switch(m->state) {
+        case HEX_ST_DRAG:
+            /* 位置在事件回调里直接跟随指针，这里不动 */
+            break;
+
+        case HEX_ST_GLIDE: {
+            m->fx += m->vx * dt;
+            m->fy += m->vy * dt;
+
+            const float decay = hex_friction_decay(dt_ms, HEX_TAU_MS);
+            m->vx *= decay;
+            m->vy *= decay;
+
+            const float speed = sqrtf(m->vx * m->vx + m->vy * m->vy);
+            if(speed < HEX_V_SNAP) {
+                hex_pick_snap_target(m);
+                m->state = HEX_ST_SNAP;
+            }
+            break;
+        }
+
+        case HEX_ST_SNAP: {
+            hex_spring_step(&m->fx, &m->vx, m->target_x, HEX_OMEGA, dt);
+            hex_spring_step(&m->fy, &m->vy, m->target_y, HEX_OMEGA, dt);
+
+            const float dx = m->fx - m->target_x;
+            const float dy = m->fy - m->target_y;
+            if(dx * dx + dy * dy < 0.25f &&
+               m->vx * m->vx + m->vy * m->vy < 1.0f) {
+                m->fx = m->target_x;
+                m->fy = m->target_y;
+                m->vx = 0.0f;
+                m->vy = 0.0f;
+                m->state = HEX_ST_IDLE;
+            }
+            break;
+        }
+
+        case HEX_ST_IDLE:
+        default:
+            break;
+    }
+}
+
 /* ------------------ 定时器 ------------------ */
 
 static void hex_timer_cb(lv_timer_t * t)
@@ -202,8 +277,69 @@ static void hex_timer_cb(lv_timer_t * t)
     if(dt_ms <= 0.0f) return;
     if(dt_ms > 100.0f) dt_ms = 100.0f;   /* 掉帧保护，避免一帧飞出天际 */
 
-    /* Task 5 会在此处插入物理状态机 */
+    hex_physics_update(m, dt_ms * 0.001f, dt_ms);
     hex_layout(obj);
+}
+
+/* ------------------ 指针事件 ------------------ */
+
+static void hex_pointer_cb(lv_event_t * e)
+{
+    lv_obj_t * obj = lv_event_get_target_obj(e);
+    hex_menu_ctx_t * m = ctx_of(obj);
+    if(m == NULL) return;
+
+    lv_indev_t * indev = lv_indev_active();
+    if(indev == NULL) return;
+
+    lv_point_t p;
+    lv_indev_get_point(indev, &p);
+
+    switch(lv_event_get_code(e)) {
+        case LV_EVENT_PRESSED:
+            m->state = HEX_ST_DRAG;
+            m->vx = 0.0f;
+            m->vy = 0.0f;
+            m->last_pt = p;
+            m->press_pt = p;
+            m->press_tick = lv_tick_get();
+            m->press_last_tick = lv_tick_get();
+            m->press_travel = 0;
+            break;
+
+        case LV_EVENT_PRESSING: {
+            const int32_t dx = p.x - m->last_pt.x;
+            const int32_t dy = p.y - m->last_pt.y;
+            if(dx == 0 && dy == 0) break;
+
+            m->press_travel += LV_ABS(dx) + LV_ABS(dy);
+
+            /* 指针右移 => 焦点在世界坐标里左移 */
+            m->fx -= (float)dx;
+            m->fy -= (float)dy;
+
+            /* 用指数滑动平均测速，直接用单帧增量会把松手瞬间的抖动放大成乱飞 */
+            const uint32_t now = lv_tick_get();
+            float dt_ms = (float)(now - m->press_last_tick);
+            if(dt_ms < 1.0f) dt_ms = 1.0f;
+            m->press_last_tick = now;
+
+            const float inst_vx = -(float)dx * 1000.0f / dt_ms;
+            const float inst_vy = -(float)dy * 1000.0f / dt_ms;
+            m->vx += (inst_vx - m->vx) * HEX_VEL_EMA;
+            m->vy += (inst_vy - m->vy) * HEX_VEL_EMA;
+
+            m->last_pt = p;
+            break;
+        }
+
+        case LV_EVENT_RELEASED:
+            m->state = HEX_ST_GLIDE;
+            break;
+
+        default:
+            break;
+    }
 }
 
 /* ------------------ 生命周期 ------------------ */
@@ -227,6 +363,7 @@ lv_obj_t * lv_hex_menu_create(lv_obj_t * parent)
     lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN);
     lv_obj_set_scrollable(obj, false);
+    lv_obj_set_clickable(obj, true);
 
     hex_menu_ctx_t * m = (hex_menu_ctx_t *)lv_malloc_zeroed(sizeof(hex_menu_ctx_t));
     LV_ASSERT_MALLOC(m);
@@ -261,6 +398,9 @@ lv_obj_t * lv_hex_menu_create(lv_obj_t * parent)
         c->last_opa = 0;
     }
 
+    lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(obj, hex_delete_cb, LV_EVENT_DELETE, NULL);
 
     m->last_tick = lv_tick_get();
