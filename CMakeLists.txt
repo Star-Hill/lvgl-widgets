@@ -19,3 +19,9 @@ target_link_libraries(lib-ui PUBLIC lvgl)
 if(NOT MSVC)
     target_link_libraries(lib-ui PUBLIC m)
 endif()
+
+# 强制本工程源文件在最严格的警告级别下编译（警告即错误）。
+# 使用 PRIVATE，避免传播到链接 lib-ui 的模拟器 main target。
+if(NOT MSVC)
+    target_compile_options(lib-ui PRIVATE -Wall -Wextra -Werror)
+endif()
