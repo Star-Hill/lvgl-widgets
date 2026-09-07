@@ -296,21 +296,25 @@ static void hex_pointer_cb(lv_event_t * e)
     lv_indev_get_point(indev, &p);
 
     switch(lv_event_get_code(e)) {
-        case LV_EVENT_PRESSED:
+        case LV_EVENT_PRESSED: {
+            const uint32_t t = lv_tick_get();
             m->state = HEX_ST_DRAG;
             m->vx = 0.0f;
             m->vy = 0.0f;
             m->last_pt = p;
             m->press_pt = p;
-            m->press_tick = lv_tick_get();
-            m->press_last_tick = lv_tick_get();
+            m->press_tick = t;
+            m->press_last_tick = t;
             m->press_travel = 0;
             break;
+        }
 
         case LV_EVENT_PRESSING: {
+            /* LVGL 在按下期间每个轮询周期都无条件发 PRESSING，并非移动才发。
+             * 零位移的这些事件必须照常走完测速：inst_v 为 0，经 EMA 把速度衰
+             * 减掉，「甩动后按住不动」松手才不会再飞出去。 */
             const int32_t dx = p.x - m->last_pt.x;
             const int32_t dy = p.y - m->last_pt.y;
-            if(dx == 0 && dy == 0) break;
 
             m->press_travel += LV_ABS(dx) + LV_ABS(dy);
 
