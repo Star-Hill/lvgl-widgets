@@ -92,6 +92,11 @@ typedef struct {
     hex_axial_t pulse_axial;
     uint32_t    pulse_tick;
 
+    /* 最近一次点击命中气泡的几何与底色，供调用方做展开动画起点 */
+    lv_area_t   last_click_area;
+    lv_color_t  last_click_color;
+    bool        has_last_click;
+
     lv_event_dsc_t * user_event;
 
     lv_timer_t * timer;
@@ -457,6 +462,12 @@ static void hex_handle_click(lv_obj_t * obj, hex_menu_ctx_t * m, lv_point_t p)
     m->pulse_tick = lv_tick_get();
 
     const int32_t idx = (int32_t)((uint32_t)hit->slot % m->item_cnt);
+
+    /* 记录命中气泡的屏幕几何与底色，供展开动画起点使用 */
+    lv_obj_get_coords(hit->bubble, &m->last_click_area);
+    m->last_click_color = m->items[idx].color;
+    m->has_last_click = true;
+
     (void)lv_obj_send_event(obj, LV_EVENT_VALUE_CHANGED, (void *)(lv_uintptr_t)idx);
 }
 
@@ -685,4 +696,14 @@ void lv_hex_menu_set_event_cb(lv_obj_t * obj, lv_event_cb_t cb, void * user_data
     if(cb != NULL) {
         m->user_event = lv_obj_add_event_cb(obj, cb, LV_EVENT_VALUE_CHANGED, user_data);
     }
+}
+
+bool lv_hex_menu_get_last_click_geom(lv_obj_t * obj, lv_area_t * out_area, lv_color_t * out_color)
+{
+    hex_menu_ctx_t * m = ctx_of(obj);
+    if(m == NULL || !m->has_last_click) return false;
+
+    if(out_area != NULL)  *out_area = m->last_click_area;
+    if(out_color != NULL) *out_color = m->last_click_color;
+    return true;
 }

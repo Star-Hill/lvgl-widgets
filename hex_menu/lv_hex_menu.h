@@ -35,6 +35,15 @@ int32_t lv_hex_menu_get_focused(lv_obj_t * obj);
  */
 void lv_hex_menu_set_event_cb(lv_obj_t * obj, lv_event_cb_t cb, void * user_data);
 
+/**
+ * 取最近一次点击命中气泡的屏幕坐标与底色，用于从气泡原地展开的动画起点。
+ * 仅在点击回调（LV_EVENT_VALUE_CHANGED）中调用有效。
+ * @param out_area   命中气泡的屏幕绝对坐标框（可为 NULL 表示不需要）
+ * @param out_color  命中气泡的底色（可为 NULL 表示不需要）
+ * @return true 表示有有效的点击几何；false 表示尚无点击记录，输出参数不被修改
+ */
+bool lv_hex_menu_get_last_click_geom(lv_obj_t * obj, lv_area_t * out_area, lv_color_t * out_color);
+
 #ifdef __cplusplus
 }
 #endif
