@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "lvgl.h"
 #include "lv_hex_menu.h"
+#include <stdio.h>
 
 #define UI_ITEM_CNT 37
 
@@ -28,6 +29,16 @@ static const char * const s_labels[UI_ITEM_CNT] = {
     "Power",    "Done",
 };
 
+static void on_item_clicked(lv_event_t * e)
+{
+    const int32_t idx = (int32_t)(lv_uintptr_t)lv_event_get_param(e);
+    if(idx >= 0 && idx < UI_ITEM_CNT) {
+        LV_LOG_USER("hex menu clicked: [%d] %s", (int)idx, s_labels[idx]);
+        printf("hex menu clicked: [%d] %s\n", (int)idx, s_labels[idx]);
+        fflush(stdout);
+    }
+}
+
 void ui_init(void)
 {
     lv_obj_t * scr = lv_screen_active();
@@ -44,4 +55,12 @@ void ui_init(void)
 
     lv_obj_t * menu = lv_hex_menu_create(scr);
     lv_hex_menu_set_items(menu, s_items, UI_ITEM_CNT);
+    lv_hex_menu_set_event_cb(menu, on_item_clicked, NULL);
+
+    /* 确保鼠标光标位于其所属系统层的最前。 */
+    lv_indev_t * indev = NULL;
+    while((indev = lv_indev_get_next(indev)) != NULL) {
+        lv_obj_t * cursor = lv_indev_get_cursor(indev);
+        if(cursor != NULL) lv_obj_move_to_index(cursor, -1);
+    }
 }

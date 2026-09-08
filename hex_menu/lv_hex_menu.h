@@ -26,7 +26,13 @@ void lv_hex_menu_set_items(lv_obj_t * obj, const lv_hex_menu_item_t * items, uin
 /** 当前离屏幕中心最近的菜单项索引，0..cnt-1；未设置菜单项时返回 -1 */
 int32_t lv_hex_menu_get_focused(lv_obj_t * obj);
 
-/** 点击菜单项时触发。回调中用 lv_event_get_user_data() 取 user_data。 */
+/**
+ * 点击菜单项时以 LV_EVENT_VALUE_CHANGED 触发。
+ * 回调中用 `(int32_t)(lv_uintptr_t)lv_event_get_param(e)` 取得菜单项索引；
+ * 索引 0 会编码为 NULL，但仍是合法值。用 lv_event_get_user_data() 取 user_data。
+ * 再次调用会替换此前由本接口注册的回调；cb == NULL 表示解除注册。
+ * 用户回调可以删除菜单对象。
+ */
 void lv_hex_menu_set_event_cb(lv_obj_t * obj, lv_event_cb_t cb, void * user_data);
 
 #ifdef __cplusplus
