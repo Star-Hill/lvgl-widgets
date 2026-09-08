@@ -76,6 +76,7 @@ typedef struct {
     float vx, vy;      /* 速度 px/s */
     float s;           /* 当前网格尺寸 */
     float s_target;    /* 缩放目标网格尺寸，s 每帧向其平滑逼近 */
+    bool  scale_settled; /* 缩放收敛帧标志，驱动一次强制 restack */
 
     hex_state_t state;
     lv_point_t  last_pt;      /* 上一帧指针位置 */
@@ -286,9 +287,11 @@ static void hex_layout(lv_obj_t * obj)
      * 静止且已稳定时跳过——move_foreground 会 invalidate 整个父对象触发全屏
      * 重绘，静止帧若重排会白白每帧全屏刷新，破坏本文件贯穿的“无变化不刷新”
      * 优化。上述任一运动帧本就在全屏重绘，重排的额外代价只是指针重链接。 */
-    if(m->s != m->s_target || m->state != HEX_ST_IDLE || m->pulse_slot >= 0) {
+    if(m->s != m->s_target || m->state != HEX_ST_IDLE || m->pulse_slot >= 0 ||
+       m->scale_settled) {
         hex_restack(m, used);
     }
+    m->scale_settled = false;
 
     for(int i = used; i < HEX_POOL_SIZE; i++) {
         m->pool[i].slot = -1;
@@ -309,7 +312,12 @@ static void hex_physics_update(hex_menu_ctx_t * m, float dt, float dt_ms)
     if(m->s != m->s_target) {
         const float old_s = m->s;
         m->s += (m->s_target - m->s) * HEX_S_LERP;
-        if(fabsf(m->s_target - m->s) < 0.05f) m->s = m->s_target;
+        if(fabsf(m->s_target - m->s) < 0.05f) {
+            m->s = m->s_target;
+            /* 收敛帧：这一帧 fx/fy 做最后一跳，可能跨光栅边界改变可见格集合与
+             * 槽位分配。强制本帧 restack 一次，避免收敛恰逢 IDLE 时冻结陈旧错序。 */
+            m->scale_settled = true;
+        }
 
         /* 网格整体是按 s 线性缩放的，焦点世界坐标须同比缩放，
          * 否则中心对准的格子会在缩放过程中飘走 */
@@ -513,18 +521,28 @@ static void hex_pointer_cb(lv_event_t * e)
     }
 }
 
-/* ------------------ 滚轮事件 ------------------ */
+/* ------------------ 滚轮事件（经 ENCODER 编辑模式的 KEY 通道） ------------------ */
 
-static void hex_rotary_cb(lv_event_t * e)
+/* SDL mousewheel 是 ENCODER 类型输入设备，从不发 LV_EVENT_ROTARY：
+ * indev_encoder_proc 对滚轮转动，在“编辑模式”下把 enc_diff 转成
+ * LV_KEY_LEFT/RIGHT 投递给获焦对象，导航模式下则 focus_prev/next
+ *（lv_indev.c:1174-1208）。故这里监听 LV_EVENT_KEY，并在 create 时把
+ * 默认组强制置于编辑模式，使滚轮持续经 KEY 通道到达本对象。
+ *
+ * 方向推导：SDL 上滚 wheel.y>0 → dsc->diff = -wheel.y < 0（lv_sdl_mousewheel.c:124）
+ * → enc_diff<0 → 编辑模式发 LV_KEY_LEFT（lv_indev.c:1179-1183）。需求为上滚
+ * 变密（网格 s 变小），故 LV_KEY_LEFT 必须对应 s_target 减小。 */
+static void hex_key_cb(lv_event_t * e)
 {
     lv_obj_t * obj = lv_event_get_target_obj(e);
     hex_menu_ctx_t * m = ctx_of(obj);
     if(m == NULL) return;
 
-    const int32_t diff = lv_event_get_rotary_diff(e);
-    if(diff == 0) return;
+    const uint32_t key = lv_event_get_key(e);
+    if(key == LV_KEY_LEFT)       m->s_target -= HEX_S_STEP;
+    else if(key == LV_KEY_RIGHT) m->s_target += HEX_S_STEP;
+    else return;
 
-    m->s_target -= (float)diff * HEX_S_STEP;
     if(m->s_target < HEX_S_MIN) m->s_target = HEX_S_MIN;
     if(m->s_target > HEX_S_MAX) m->s_target = HEX_S_MAX;
 }
@@ -592,15 +610,35 @@ lv_obj_t * lv_hex_menu_create(lv_obj_t * parent)
     lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_PRESS_LOST, NULL);
-    lv_obj_add_event_cb(obj, hex_rotary_cb, LV_EVENT_ROTARY, NULL);
+    lv_obj_add_event_cb(obj, hex_key_cb, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(obj, hex_delete_cb, LV_EVENT_DELETE, NULL);
 
-    /* ENCODER（SDL mousewheel）事件只发给默认组中获焦的对象，必须入组并获焦 */
+    /* SDL mousewheel（ENCODER）转动，仅当所在组处于“编辑模式”时才把 enc_diff
+     * 转成 LV_KEY_LEFT/RIGHT 投递给获焦对象（lv_indev.c:1176）。故入组、获焦，
+     * 再强制编辑模式。顺序要紧：lv_group_focus_obj 内部会 set_editing(false)
+     *（“On defocus edit mode must be leaved”，lv_group.c:250），因此 set_editing(true)
+     * 必须放在 focus_obj 之后。
+     *
+     * 本对象刻意保持“非可编辑 + 不可滚动”：enc_diff→KEY 通道只看组的 editing
+     * 标志、不看对象可编辑性，故编辑模式足矣、无需把对象设为 editable。而中键
+     *(ENTER)的编辑模式 toggle 只在焦点对象“可编辑或可滚动”时发生
+     *（lv_indev.c:1071/1125-1129）——非可编辑非可滚动对象上中键只走“发 CLICKED”
+     * 分支，永不 toggle editing，编辑模式因此稳定。若反把对象设为 editable，中键
+     * 反而可能 toggle 掉编辑模式，是引入不稳定而非修复。
+     *（再者 SDL mousewheel 的 read cb 从不设 data->key，中键 key 恒为 0，ENTER
+     *  分支本就进不去——双重保险。） */
     lv_group_t * g = lv_group_get_default();
     if(g != NULL) {
         lv_group_add_obj(g, obj);
         lv_group_focus_obj(obj);
+        lv_group_set_editing(g, true);
     }
+
+    /* 入组获焦 + 编辑模式后，主题可能给对象画焦点/编辑 outline；根对象全屏透明，
+     * 关掉这些状态下的 outline 以免屏幕边缘出现描边。 */
+    lv_obj_set_style_outline_width(obj, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(obj, 0, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_outline_width(obj, 0, LV_PART_MAIN | LV_STATE_EDITED);
 
     m->last_tick = lv_tick_get();
     m->timer = lv_timer_create(hex_timer_cb, HEX_PERIOD_MS, obj);
