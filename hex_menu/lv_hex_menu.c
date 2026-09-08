@@ -8,6 +8,8 @@
 #define HEX_S_DEF            80.0f    /* 网格尺寸默认值 */
 #define HEX_S_MIN            60.0f
 #define HEX_S_MAX           120.0f
+#define HEX_S_STEP            8.0f    /* 每格滚轮改变的网格尺寸 */
+#define HEX_S_LERP           0.18f    /* 每帧向目标逼近的比例 */
 #define HEX_D_MAX           120.0f    /* 中心气泡直径 */
 #define HEX_D_MIN            44.0f    /* 最远气泡直径 */
 #define HEX_R_INFLUENCE     420.0f    /* 放大镜影响半径 */
@@ -73,6 +75,7 @@ typedef struct {
     float fx, fy;      /* 焦点世界坐标 */
     float vx, vy;      /* 速度 px/s */
     float s;           /* 当前网格尺寸 */
+    float s_target;    /* 缩放目标网格尺寸，s 每帧向其平滑逼近 */
 
     hex_state_t state;
     lv_point_t  last_pt;      /* 上一帧指针位置 */
@@ -114,6 +117,39 @@ static const lv_hex_menu_item_t * item_of_slot(hex_menu_ctx_t * m, int32_t slot)
 {
     if(m->items == NULL || m->item_cnt == 0) return NULL;
     return &m->items[(uint32_t)slot % m->item_cnt];
+}
+
+/* 按直径升序调整池气泡的 z 序，使直径更大（更靠近中心、被放大）的气泡
+ * 拥有更高 z 序，永远盖在相邻气泡之上。
+ *
+ * 背景：池对象 z 序在创建时固定为池数组下标，而布局按光栅顺序（上行到
+ * 下行）把世界格填入 pool[0..used)，于是默认绘制次序是下行压上行。s 缩到
+ * HEX_S_MIN 时列间距 103.9 < D_MAX(120)，中心放大的气泡会与相邻气泡重叠，
+ * 若不干预就会被下方行的气泡压住，视觉错乱。此处按直径升序依次移到最前，
+ * 收尾后最大直径者位于子链表末端 = 绘制最上层。
+ *
+ * 只作用于本菜单 active screen 上的池气泡，不触碰 system layer 的鼠标光标
+ * （Task 6：光标在最前），两者不在同一父层级，互不影响。 */
+static void hex_restack(hex_menu_ctx_t * m, int used)
+{
+    int32_t order[HEX_POOL_SIZE];
+    for(int i = 0; i < used; i++) order[i] = i;
+
+    /* 插入排序，按 last_d（本帧直径）升序。used 至多 128，代价可忽略。 */
+    for(int i = 1; i < used; i++) {
+        const int32_t key = order[i];
+        const int32_t kd = m->pool[key].last_d;
+        int j = i - 1;
+        while(j >= 0 && m->pool[order[j]].last_d > kd) {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+
+    for(int i = 0; i < used; i++) {
+        lv_obj_move_foreground(m->pool[order[i]].bubble);
+    }
 }
 
 /* ------------------ 布局 ------------------ */
@@ -246,6 +282,14 @@ static void hex_layout(lv_obj_t * obj)
     m->focus_slot = best_slot;
     if(best_slot >= 0) m->focus_axial = best_axial;
 
+    /* 仅在有视觉变化的帧重排 z 序：缩放中、拖拽/惯性/吸附中、或脉冲活动时。
+     * 静止且已稳定时跳过——move_foreground 会 invalidate 整个父对象触发全屏
+     * 重绘，静止帧若重排会白白每帧全屏刷新，破坏本文件贯穿的“无变化不刷新”
+     * 优化。上述任一运动帧本就在全屏重绘，重排的额外代价只是指针重链接。 */
+    if(m->s != m->s_target || m->state != HEX_ST_IDLE || m->pulse_slot >= 0) {
+        hex_restack(m, used);
+    }
+
     for(int i = used; i < HEX_POOL_SIZE; i++) {
         m->pool[i].slot = -1;
         lv_obj_set_hidden(m->pool[i].bubble, true);
@@ -262,6 +306,20 @@ static void hex_pick_snap_target(hex_menu_ctx_t * m)
 
 static void hex_physics_update(hex_menu_ctx_t * m, float dt, float dt_ms)
 {
+    if(m->s != m->s_target) {
+        const float old_s = m->s;
+        m->s += (m->s_target - m->s) * HEX_S_LERP;
+        if(fabsf(m->s_target - m->s) < 0.05f) m->s = m->s_target;
+
+        /* 网格整体是按 s 线性缩放的，焦点世界坐标须同比缩放，
+         * 否则中心对准的格子会在缩放过程中飘走 */
+        const float k = m->s / old_s;
+        m->fx *= k;
+        m->fy *= k;
+        m->target_x *= k;
+        m->target_y *= k;
+    }
+
     switch(m->state) {
         case HEX_ST_DRAG:
             /* 位置在事件回调里直接跟随指针，这里不动 */
@@ -455,6 +513,22 @@ static void hex_pointer_cb(lv_event_t * e)
     }
 }
 
+/* ------------------ 滚轮事件 ------------------ */
+
+static void hex_rotary_cb(lv_event_t * e)
+{
+    lv_obj_t * obj = lv_event_get_target_obj(e);
+    hex_menu_ctx_t * m = ctx_of(obj);
+    if(m == NULL) return;
+
+    const int32_t diff = lv_event_get_rotary_diff(e);
+    if(diff == 0) return;
+
+    m->s_target -= (float)diff * HEX_S_STEP;
+    if(m->s_target < HEX_S_MIN) m->s_target = HEX_S_MIN;
+    if(m->s_target > HEX_S_MAX) m->s_target = HEX_S_MAX;
+}
+
 /* ------------------ 生命周期 ------------------ */
 
 static void hex_delete_cb(lv_event_t * e)
@@ -483,6 +557,7 @@ lv_obj_t * lv_hex_menu_create(lv_obj_t * parent)
     if(m == NULL) return obj;
 
     m->s = HEX_S_DEF;
+    m->s_target = HEX_S_DEF;
     m->focus_slot = -1;
     m->pulse_slot = -1;
     lv_obj_set_user_data(obj, m);
@@ -517,7 +592,15 @@ lv_obj_t * lv_hex_menu_create(lv_obj_t * parent)
     lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(obj, hex_pointer_cb, LV_EVENT_PRESS_LOST, NULL);
+    lv_obj_add_event_cb(obj, hex_rotary_cb, LV_EVENT_ROTARY, NULL);
     lv_obj_add_event_cb(obj, hex_delete_cb, LV_EVENT_DELETE, NULL);
+
+    /* ENCODER（SDL mousewheel）事件只发给默认组中获焦的对象，必须入组并获焦 */
+    lv_group_t * g = lv_group_get_default();
+    if(g != NULL) {
+        lv_group_add_obj(g, obj);
+        lv_group_focus_obj(obj);
+    }
 
     m->last_tick = lv_tick_get();
     m->timer = lv_timer_create(hex_timer_cb, HEX_PERIOD_MS, obj);
