@@ -9,7 +9,10 @@
 #define CARD_W        320   /* 展开后卡片宽 */
 #define CARD_H        360   /* 展开后卡片高 */
 #define CARD_RADIUS    22
-#define CARD_ANIM_MS  360
+#define CARD_ANIM_MS  360   /* 展开时长 */
+#define GENIE_MS      460   /* 神灯收起时长 */
+#define GENIE_SCALE_FULL 256 /* LVGL transform_scale 基准：256 = 1.0 */
+#define GENIE_SCALE_MIN   28 /* 收起终点缩放 ≈0.11，缩到接近气泡大小 */
 
 static lv_hex_menu_item_t s_items[UI_ITEM_CNT];
 
@@ -93,6 +96,40 @@ static void card_closed_cb(lv_anim_t * a)
     /* 本版 LVGL 中 lv_obj_add_flag(HIDDEN) 弃用触发 -Werror，用 set_hidden */
     lv_obj_set_hidden(s_veil, true);
     lv_obj_set_hidden(s_card, true);
+    /* 清除神灯遗留的 transform，避免影响下次展开 */
+    lv_obj_set_style_translate_x(s_card, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(s_card, 0, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_x(s_card, GENIE_SCALE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_y(s_card, GENIE_SCALE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_card, LV_OPA_COVER, LV_PART_MAIN);
+}
+
+/* 神灯收起：卡片朝气泡方向加速位移 + 各向同性缩小 + 渐隐。t ∈ [0,1000] */
+static void card_genie_exec(void * var, int32_t t)
+{
+    lv_obj_t * card = (lv_obj_t *)var;
+
+    /* 居中卡片中心 → 目标气泡中心的位移矢量 */
+    lv_area_t centered;
+    card_target_area(&centered);
+    const int32_t cx0 = (centered.x1 + centered.x2) / 2;
+    const int32_t cy0 = (centered.y1 + centered.y2) / 2;
+    const int32_t tx  = (s_from.x1 + s_from.x2) / 2;
+    const int32_t ty  = (s_from.y1 + s_from.y2) / 2;
+
+    /* 位移用加速曲线 acc=p²（越接近气泡越快）；缩放/透明用线性 t */
+    const int32_t acc = t * t / 1000;   /* 0..1000 的平方归一 */
+    lv_obj_set_style_translate_x(card, (tx - cx0) * acc / 1000, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(card, (ty - cy0) * acc / 1000, LV_PART_MAIN);
+
+    /* 缩放 256→GENIE_SCALE_MIN，各向同性 */
+    const int32_t sc = GENIE_SCALE_FULL + (GENIE_SCALE_MIN - GENIE_SCALE_FULL) * t / 1000;
+    lv_obj_set_style_transform_scale_x(card, sc, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_y(card, sc, LV_PART_MAIN);
+
+    /* 渐隐；遮罩同步淡出 */
+    lv_obj_set_style_opa(card, (lv_opa_t)(255 - 255 * t / 1000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_veil, (lv_opa_t)(180 - 180 * t / 1000), LV_PART_MAIN);
 }
 static void card_animate(int32_t from_t, int32_t to_t, lv_anim_completed_cb_t done)
 {
@@ -111,9 +148,30 @@ static void card_close(void)
 {
     if(!s_open) return;
     s_open = false;
-    /* 从展开态(1000)缩回气泡起点(0)，结束后隐藏 */
+
+    /* 停掉可能还在跑的展开动画，锁定卡片为完整居中态作为神灯基准 */
     lv_anim_delete(s_card, card_anim_exec);
-    card_animate(1000, 0, card_closed_cb);
+    lv_area_t centered;
+    card_target_area(&centered);
+    lv_obj_set_pos(s_card, centered.x1, centered.y1);
+    lv_obj_set_size(s_card, CARD_W, CARD_H);
+    lv_obj_set_style_radius(s_card, CARD_RADIUS, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_card, lv_color_hex(0x1b1b22), LV_PART_MAIN);
+    /* 缩放围绕卡片中心 */
+    lv_obj_set_style_transform_pivot_x(s_card, CARD_W / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(s_card, CARD_H / 2, LV_PART_MAIN);
+
+    /* 神灯吸走：位移+缩小+渐隐，结束后隐藏并清 transform */
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_card);
+    lv_anim_set_values(&a, 0, 1000);
+    lv_anim_set_duration(&a, GENIE_MS);
+    lv_anim_set_exec_cb(&a, card_genie_exec);
+    /* path 用线性；加速感由 exec 内各曲线自行控制，避免双重加速 */
+    lv_anim_set_path_cb(&a, lv_anim_path_linear);
+    lv_anim_set_completed_cb(&a, card_closed_cb);
+    lv_anim_start(&a);
 }
 
 static void card_open(int32_t idx)
@@ -126,6 +184,14 @@ static void card_open(int32_t idx)
     lv_label_set_text(s_card_ico, s_icons[idx]);
     lv_obj_set_style_bg_color(s_card_ico, s_from_color, LV_PART_MAIN);
     lv_label_set_text(s_card_title, s_labels[idx]);
+
+    /* 若上一次神灯收起还没跑完，先停掉并复位其遗留的 transform/opa */
+    lv_anim_delete(s_card, card_genie_exec);
+    lv_obj_set_style_translate_x(s_card, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(s_card, 0, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_x(s_card, GENIE_SCALE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_y(s_card, GENIE_SCALE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_card, LV_OPA_COVER, LV_PART_MAIN);
 
     /* 起始与气泡完全重合的圆 */
     lv_obj_set_hidden(s_veil, false);
