@@ -1,8 +1,6 @@
 #include "hex_grid.h"
 #include <math.h>
 
-#define HEX_SQRT3 1.7320508075688772f
-
 void hex_axial_to_px(hex_axial_t a, float s, float * out_x, float * out_y)
 {
     *out_x = s * HEX_SQRT3 * ((float)a.q + (float)a.r * 0.5f);

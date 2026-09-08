@@ -12,6 +12,9 @@ extern "C" {
  */
 #define HEX_SLOT_CNT 37
 
+/** √3，用于列间距 s·√3 的坐标换算 */
+#define HEX_SQRT3 1.7320508075688772f
+
 /** pointy-top 轴向坐标 */
 typedef struct {
     int q;

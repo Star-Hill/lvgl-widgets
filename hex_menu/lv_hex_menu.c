@@ -20,7 +20,7 @@
 
 #define HEX_POOL_SIZE         128     /* S_MIN 时最坏约需 108，留余量 */
 #define HEX_PERIOD_MS          16
-#define HEX_SQRT3             1.7320508075688772f
+/* HEX_SQRT3 定义在 hex_grid.h，随坐标换算一起共享 */
 
 #define HEX_TAU_MS          260.0f   /* 惯性时间常数 */
 #define HEX_V_SNAP           12.0f   /* 低于此速度转入吸附，px/s */
@@ -80,7 +80,6 @@ typedef struct {
 
     hex_state_t state;
     lv_point_t  last_pt;      /* 上一帧指针位置 */
-    lv_point_t  press_pt;     /* 按下时的指针位置 */
     uint32_t    press_tick;
     uint32_t    press_last_tick;   /* 仅供 PRESSING 测速使用，与定时器的 last_tick 互不干扰 */
     int32_t     press_travel; /* 按下期间累计位移，用于区分点击与拖拽 */
@@ -493,7 +492,6 @@ static void hex_pointer_cb(lv_event_t * e)
             m->vx = 0.0f;
             m->vy = 0.0f;
             m->last_pt = p;
-            m->press_pt = p;
             m->press_tick = t;
             m->press_last_tick = t;
             m->press_travel = 0;
