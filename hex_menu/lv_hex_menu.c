@@ -380,6 +380,14 @@ static void hex_timer_cb(lv_timer_t * t)
     hex_menu_ctx_t * m = ctx_of(obj);
     if(m == NULL) return;
 
+    /* 防御性每帧重置编辑模式：共享 KEYPAD 组里键盘 TAB/PageDown→LV_KEY_NEXT、
+     * PageUp→LV_KEY_PREV 会把组 editing 清成 false（indev_keypad_proc,
+     * lv_indev.c:878），之后无人恢复 → 滚轮缩放永久静默失效。每帧补置回 true
+     * 使其自愈。lv_group_set_editing 在值已为 true 时立即返回（lv_group.c:334），
+     * 零代价、不 invalidate，不破坏“无变化不刷新”。 */
+    lv_group_t * g = lv_group_get_default();
+    if(g != NULL) lv_group_set_editing(g, true);
+
     const uint32_t now = lv_tick_get();
     float dt_ms = (float)(now - m->last_tick);
     m->last_tick = now;
