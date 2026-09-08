@@ -2,3 +2,6 @@ build/
 *.exe
 *.o
 *.a
+
+# SDD 内部过程产物（进度账本、审查包、截图、脚本），不入公开仓库
+.superpowers/
