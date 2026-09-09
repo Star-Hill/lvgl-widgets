@@ -49,6 +49,7 @@ typedef struct {
     lv_obj_t *  rays[DNS_RAY_CNT];
     dns_cloud_t clouds[DNS_CLOUD_CNT];
     lv_obj_t *  stars[DNS_STAR_CNT];
+    void *      star_buf[DNS_STAR_CNT];   /* 星星 canvas 的像素缓冲，需自行释放 */
     bool        night;
 } dns_ctx_t;
 
@@ -155,6 +156,11 @@ static void dns_delete_cb(lv_event_t * e)
     for(int i = 0; i < DNS_CLOUD_CNT; i++) lv_anim_delete(&c->clouds[i], dns_cloud_drift_exec);
     for(int i = 0; i < DNS_STAR_CNT; i++)  lv_anim_delete(c->stars[i], dns_twinkle_exec);
 
+    /* 星星 canvas 的像素缓冲由本组件分配，LVGL 不会代为回收 */
+    for(int i = 0; i < DNS_STAR_CNT; i++) {
+        if(c->star_buf[i] != NULL) lv_free(c->star_buf[i]);
+    }
+
     lv_obj_set_user_data(obj, NULL);
     lv_free(c);
 }
@@ -180,33 +186,64 @@ static lv_obj_t * dns_circle(lv_obj_t * parent, int32_t x, int32_t y, int32_t d,
     return o;
 }
 
-/* 四角星：CSS 用 SVG path 画内凹四角星，这里用两条圆角细条交叉近似闪光 */
-static lv_obj_t * dns_star(lv_obj_t * parent, int32_t x, int32_t y, int32_t d)
+/* 四角星：用 canvas + 矢量绘制还原 CSS 里那条 SVG path。
+ *
+ * 原始 path（20x20 viewBox）：
+ *   M 0 10  C 10 10, 10 10, 0 10   C 10 10, 10 10, 10 20
+ *           C 10 10, 10 10, 20 10  C 10 10, 10 10, 10 0
+ *           C 10 10, 10 10, 0 10   Z
+ * 即依次连接左中→下中→右中→上中→左中四个尖点，而每段三次贝塞尔的两个控制点
+ * 都落在中心 (10,10)。控制点把曲线拽向圆心，于是四条边向内凹陷、尖角收细——
+ * 这正是它不同于「加号」的地方。
+ *
+ * 画好的像素留在 canvas 自带的缓冲里，之后不再重绘；缩放与闪烁仍由
+ * transform_scale 施加在 canvas 对象上。 */
+static lv_obj_t * dns_star(lv_obj_t * parent, int32_t x, int32_t y, int32_t d, void ** out_buf)
 {
-    lv_obj_t * s = lv_obj_create(parent);
+    const int32_t full = DNS_S(d);
+
+    lv_obj_t * s = lv_canvas_create(parent);
     lv_obj_remove_style_all(s);
-    lv_obj_set_size(s, DNS_S(d), DNS_S(d));
     lv_obj_set_pos(s, DNS_S(x), DNS_S(y));
     lv_obj_set_clickable(s, false);
     lv_obj_set_scrollable(s, false);
-    lv_obj_set_overflow_visible(s, true);
 
-    const int32_t full = DNS_S(d);
-    int32_t thin = full / 9;   /* 细条近似 CSS 内凹四角星的纤细尖角 */
-    if(thin < 2) thin = 2;
+    /* ARGB8888 便于让星形之外保持透明 */
+    const uint32_t stride = (uint32_t)full * 4u;
+    void * buf = lv_malloc_zeroed(stride * (uint32_t)full + LV_DRAW_BUF_ALIGN);
+    LV_ASSERT_MALLOC(buf);
+    if(buf == NULL) return s;
+    *out_buf = buf;   /* 交回给 ctx，删除时释放 */
+    lv_canvas_set_buffer(s, buf, full, full, LV_COLOR_FORMAT_ARGB8888);
+    lv_canvas_fill_bg(s, lv_color_black(), LV_OPA_TRANSP);
 
-    for(int i = 0; i < 2; i++) {
-        lv_obj_t * bar = lv_obj_create(s);
-        lv_obj_remove_style_all(bar);
-        if(i == 0) lv_obj_set_size(bar, thin, full);
-        else       lv_obj_set_size(bar, full, thin);
-        lv_obj_center(bar);
-        lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(bar, lv_color_hex(DNS_C_STAR), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_clickable(bar, false);
-        lv_obj_set_scrollable(bar, false);
-    }
+    lv_layer_t layer;
+    lv_canvas_init_layer(s, &layer);
+
+    lv_vector_path_t * path = lv_vector_path_create(LV_VECTOR_PATH_QUALITY_HIGH);
+    const float half = (float)full * 0.5f;   /* 中心，即 viewBox 的 (10,10) */
+    const lv_fpoint_t c  = { half, half };                 /* 两个控制点重合于中心 */
+    const lv_fpoint_t left  = { 0.0f,        half };
+    const lv_fpoint_t down  = { half,        (float)full };
+    const lv_fpoint_t right = { (float)full, half };
+    const lv_fpoint_t up    = { half,        0.0f };
+
+    lv_vector_path_move_to(path, &left);
+    lv_vector_path_cubic_to(path, &c, &c, &down);
+    lv_vector_path_cubic_to(path, &c, &c, &right);
+    lv_vector_path_cubic_to(path, &c, &c, &up);
+    lv_vector_path_cubic_to(path, &c, &c, &left);
+    lv_vector_path_close(path);
+
+    lv_draw_vector_dsc_t * dsc = lv_draw_vector_dsc_create(&layer);
+    lv_draw_vector_dsc_set_fill_color(dsc, lv_color_hex(DNS_C_STAR));
+    lv_draw_vector_dsc_add_path(dsc, path);
+    lv_draw_vector(dsc);
+
+    lv_draw_vector_dsc_delete(dsc);
+    lv_vector_path_delete(path);
+    lv_canvas_finish_layer(s, &layer);
+
     return s;
 }
 
@@ -274,7 +311,7 @@ lv_obj_t * lv_day_night_switch_create(lv_obj_t * parent)
 
     /* 星空最后建，位于最上层；初始在容器上方且透明 */
     for(int i = 0; i < DNS_STAR_CNT; i++) {
-        c->stars[i] = dns_star(root, STAR_XYD[i][0], STAR_XYD[i][1], STAR_XYD[i][2]);
+        c->stars[i] = dns_star(root, STAR_XYD[i][0], STAR_XYD[i][1], STAR_XYD[i][2], &c->star_buf[i]);
         lv_obj_set_style_opa(c->stars[i], LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_translate_y(c->stars[i], -DNS_S(DNS_STARS_RISE), LV_PART_MAIN);
     }
