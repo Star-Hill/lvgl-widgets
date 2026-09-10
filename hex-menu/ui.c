@@ -94,8 +94,8 @@ static void card_closed_cb(lv_anim_t * a)
 {
     (void)a;
     /* 本版 LVGL 中 lv_obj_add_flag(HIDDEN) 弃用触发 -Werror，用 set_hidden */
-    lv_obj_set_hidden(s_veil, true);
-    lv_obj_set_hidden(s_card, true);
+    lv_obj_set_flag(s_veil, LV_OBJ_FLAG_HIDDEN, true);
+    lv_obj_set_flag(s_card, LV_OBJ_FLAG_HIDDEN, true);
     /* 清除神灯遗留的 transform，避免影响下次展开 */
     lv_obj_set_style_translate_x(s_card, 0, LV_PART_MAIN);
     lv_obj_set_style_translate_y(s_card, 0, LV_PART_MAIN);
@@ -194,8 +194,8 @@ static void card_open(int32_t idx)
     lv_obj_set_style_opa(s_card, LV_OPA_COVER, LV_PART_MAIN);
 
     /* 起始与气泡完全重合的圆 */
-    lv_obj_set_hidden(s_veil, false);
-    lv_obj_set_hidden(s_card, false);
+    lv_obj_set_flag(s_veil, LV_OBJ_FLAG_HIDDEN, false);
+    lv_obj_set_flag(s_card, LV_OBJ_FLAG_HIDDEN, false);
     lv_obj_set_style_opa(s_card_body, 0, LV_PART_MAIN);
     lv_obj_move_foreground(s_veil);
     lv_obj_move_foreground(s_card);
@@ -233,9 +233,9 @@ static void build_card(void)
     lv_obj_set_size(s_veil, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(s_veil, lv_color_hex(0x101014), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_veil, 0, LV_PART_MAIN);
-    lv_obj_set_clickable(s_veil, true);
+    lv_obj_set_flag(s_veil, LV_OBJ_FLAG_CLICKABLE, true);
     lv_obj_add_event_cb(s_veil, on_veil_clicked, LV_EVENT_CLICKED, NULL);
-    lv_obj_set_hidden(s_veil, true);
+    lv_obj_set_flag(s_veil, LV_OBJ_FLAG_HIDDEN, true);
 
     /* 卡片本体 */
     s_card = lv_obj_create(top);
@@ -247,7 +247,7 @@ static void build_card(void)
     lv_obj_set_style_shadow_width(s_card, 40, LV_PART_MAIN);
     lv_obj_set_style_shadow_opa(s_card, LV_OPA_50, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(s_card, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_hidden(s_card, true);
+    lv_obj_set_flag(s_card, LV_OBJ_FLAG_HIDDEN, true);
 
     /* 顶部大图标（圆底） */
     s_card_ico = lv_label_create(s_card);
@@ -309,7 +309,7 @@ void ui_init(void)
     lv_obj_t * scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x101014), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_scrollable(scr, false);
+    lv_obj_set_flag(scr, LV_OBJ_FLAG_SCROLLABLE, false);
 
     for(uint32_t i = 0; i < UI_ITEM_CNT; i++) {
         s_items[i].icon  = s_icons[i];

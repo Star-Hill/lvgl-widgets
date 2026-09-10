@@ -130,7 +130,7 @@ static void ft_fade_done_cb(lv_anim_t * a)
     /* 淡出结束后再真正隐藏，避免占据点击区域 */
     lv_obj_t * panel = (lv_obj_t *)a->var;
     if(lv_obj_get_style_opa(panel, LV_PART_MAIN) == LV_OPA_TRANSP) {
-        lv_obj_set_hidden(panel, true);
+        lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, true);
     }
 }
 
@@ -164,8 +164,8 @@ lv_obj_t * lv_file_tree_create(lv_obj_t * parent, const char * title)
     lv_obj_t * root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
     lv_obj_set_size(root, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_scrollable(root, false);
-    lv_obj_set_overflow_visible(root, true);
+    lv_obj_set_flag(root, LV_OBJ_FLAG_SCROLLABLE, false);
+    lv_obj_set_flag(root, LV_OBJ_FLAG_OVERFLOW_VISIBLE, true);
 
     ft_ctx_t * c = lv_malloc_zeroed(sizeof(ft_ctx_t));
     LV_ASSERT_MALLOC(c);
@@ -188,8 +188,8 @@ lv_obj_t * lv_file_tree_create(lv_obj_t * parent, const char * title)
     lv_obj_set_flex_flow(trig, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(trig, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(trig, FT_S(FT_GAP_TRIGGER), LV_PART_MAIN);
-    lv_obj_set_scrollable(trig, false);
-    lv_obj_set_clickable(trig, true);
+    lv_obj_set_flag(trig, LV_OBJ_FLAG_SCROLLABLE, false);
+    lv_obj_set_flag(trig, LV_OBJ_FLAG_CLICKABLE, true);
     c->trigger = trig;
 
     /* 文件夹图标：canvas + 矢量绘制 */
@@ -235,10 +235,10 @@ lv_obj_t * lv_file_tree_create(lv_obj_t * parent, const char * title)
     lv_obj_set_style_pad_all(panel, FT_S(FT_PANEL_PAD), LV_PART_MAIN);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(panel, FT_S(FT_ROW_GAP), LV_PART_MAIN);
-    lv_obj_set_scrollable(panel, false);
+    lv_obj_set_flag(panel, LV_OBJ_FLAG_SCROLLABLE, false);
     lv_obj_align_to(panel, trig, LV_ALIGN_OUT_BOTTOM_LEFT, 0, FT_S(FT_PANEL_OFFSET));
     lv_obj_set_style_opa(panel, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_hidden(panel, true);
+    lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, true);
     c->panel = panel;
     c->open = false;
 
@@ -282,7 +282,7 @@ void lv_file_tree_set_open(lv_obj_t * obj, bool open, bool anim)
     lv_anim_delete(c->panel, ft_fade_exec);
 
     if(open) {
-        lv_obj_set_hidden(c->panel, false);
+        lv_obj_set_flag(c->panel, LV_OBJ_FLAG_HIDDEN, false);
         /* 面板挂在顶层，不随组件移动，故每次打开都按触发卡片的当前位置重新对齐 */
         lv_obj_update_layout(c->trigger);
         lv_obj_align_to(c->panel, c->trigger, LV_ALIGN_OUT_BOTTOM_LEFT, 0, FT_S(FT_PANEL_OFFSET));
@@ -292,7 +292,7 @@ void lv_file_tree_set_open(lv_obj_t * obj, bool open, bool anim)
     const int32_t to = open ? LV_OPA_COVER : LV_OPA_TRANSP;
     if(!anim) {
         lv_obj_set_style_opa(c->panel, (lv_opa_t)to, LV_PART_MAIN);
-        if(!open) lv_obj_set_hidden(c->panel, true);
+        if(!open) lv_obj_set_flag(c->panel, LV_OBJ_FLAG_HIDDEN, true);
         return;
     }
 

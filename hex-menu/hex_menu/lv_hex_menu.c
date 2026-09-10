@@ -273,7 +273,7 @@ static void hex_layout(lv_obj_t * obj)
                 lv_obj_set_style_bg_opa(c->bubble, opa, LV_PART_MAIN);
                 lv_obj_set_style_text_opa(c->icon, opa, LV_PART_MAIN);
             }
-            lv_obj_set_hidden(c->bubble, false);
+            lv_obj_set_flag(c->bubble, LV_OBJ_FLAG_HIDDEN, false);
         }
     }
 
@@ -299,7 +299,7 @@ static void hex_layout(lv_obj_t * obj)
 
     for(int i = used; i < HEX_POOL_SIZE; i++) {
         m->pool[i].slot = -1;
-        lv_obj_set_hidden(m->pool[i].bubble, true);
+        lv_obj_set_flag(m->pool[i].bubble, LV_OBJ_FLAG_HIDDEN, true);
     }
 }
 
@@ -438,7 +438,7 @@ static void hex_handle_click(lv_obj_t * obj, hex_menu_ctx_t * m, lv_point_t p)
 
     for(int i = 0; i < HEX_POOL_SIZE; i++) {
         hex_cell_t * c = &m->pool[i];
-        if(c->slot < 0 || lv_obj_is_hidden(c->bubble)) continue;
+        if(c->slot < 0 || lv_obj_has_flag(c->bubble, LV_OBJ_FLAG_HIDDEN)) continue;
 
         lv_area_t area;
         lv_obj_get_coords(c->bubble, &area);
@@ -584,8 +584,8 @@ lv_obj_t * lv_hex_menu_create(lv_obj_t * parent)
     lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN);
-    lv_obj_set_scrollable(obj, false);
-    lv_obj_set_clickable(obj, true);
+    lv_obj_set_flag(obj, LV_OBJ_FLAG_SCROLLABLE, false);
+    lv_obj_set_flag(obj, LV_OBJ_FLAG_CLICKABLE, true);
 
     hex_menu_ctx_t * m = (hex_menu_ctx_t *)lv_malloc_zeroed(sizeof(hex_menu_ctx_t));
     LV_ASSERT_MALLOC(m);
@@ -601,9 +601,9 @@ lv_obj_t * lv_hex_menu_create(lv_obj_t * parent)
         hex_cell_t * c = &m->pool[i];
 
         c->bubble = lv_obj_create(obj);
-        lv_obj_set_clickable(c->bubble, false);   /* 事件交给根对象统一处理 */
-        lv_obj_set_scrollable(c->bubble, false);
-        lv_obj_set_hidden(c->bubble, true);
+        lv_obj_set_flag(c->bubble, LV_OBJ_FLAG_CLICKABLE, false);   /* 事件交给根对象统一处理 */
+        lv_obj_set_flag(c->bubble, LV_OBJ_FLAG_SCROLLABLE, false);
+        lv_obj_set_flag(c->bubble, LV_OBJ_FLAG_HIDDEN, true);
         lv_obj_set_style_radius(c->bubble, LV_RADIUS_CIRCLE, LV_PART_MAIN);
         lv_obj_set_style_border_width(c->bubble, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_all(c->bubble, 0, LV_PART_MAIN);

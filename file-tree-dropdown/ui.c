@@ -21,7 +21,7 @@ void ui_init(void)
     lv_obj_t * scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0xF3F4F6), LV_PART_MAIN);   /* 浅灰底衬出白卡片 */
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_scrollable(scr, false);
+    lv_obj_set_flag(scr, LV_OBJ_FLAG_SCROLLABLE, false);
 
     lv_obj_t * ft = lv_file_tree_create(scr, "Project Structure");
     lv_file_tree_set_items(ft, s_items, UI_ITEM_CNT);

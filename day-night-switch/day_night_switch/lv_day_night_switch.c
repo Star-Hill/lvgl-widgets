@@ -179,10 +179,10 @@ static lv_obj_t * dns_circle(lv_obj_t * parent, int32_t x, int32_t y, int32_t d,
     lv_obj_set_style_bg_color(o, lv_color_hex(color), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_opa(o, opa, LV_PART_MAIN);
-    lv_obj_set_clickable(o, false);
-    lv_obj_set_scrollable(o, false);
+    lv_obj_set_flag(o, LV_OBJ_FLAG_CLICKABLE, false);
+    lv_obj_set_flag(o, LV_OBJ_FLAG_SCROLLABLE, false);
     /* 子元素需能超出各自父边界，统一由根容器裁剪 */
-    lv_obj_set_overflow_visible(o, true);
+    lv_obj_set_flag(o, LV_OBJ_FLAG_OVERFLOW_VISIBLE, true);
     return o;
 }
 
@@ -205,8 +205,8 @@ static lv_obj_t * dns_star(lv_obj_t * parent, int32_t x, int32_t y, int32_t d, v
     lv_obj_t * s = lv_canvas_create(parent);
     lv_obj_remove_style_all(s);
     lv_obj_set_pos(s, DNS_S(x), DNS_S(y));
-    lv_obj_set_clickable(s, false);
-    lv_obj_set_scrollable(s, false);
+    lv_obj_set_flag(s, LV_OBJ_FLAG_CLICKABLE, false);
+    lv_obj_set_flag(s, LV_OBJ_FLAG_SCROLLABLE, false);
 
     /* ARGB8888 便于让星形之外保持透明 */
     const uint32_t stride = (uint32_t)full * 4u;
@@ -273,8 +273,8 @@ lv_obj_t * lv_day_night_switch_create(lv_obj_t * parent)
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
     /* 对应 CSS 的 overflow: hidden，云与光晕越界后在此被裁掉 */
     lv_obj_set_style_clip_corner(root, true, LV_PART_MAIN);
-    lv_obj_set_scrollable(root, false);
-    lv_obj_set_clickable(root, true);
+    lv_obj_set_flag(root, LV_OBJ_FLAG_SCROLLABLE, false);
+    lv_obj_set_flag(root, LV_OBJ_FLAG_CLICKABLE, true);
 
     dns_ctx_t * c = lv_malloc_zeroed(sizeof(dns_ctx_t));
     LV_ASSERT_MALLOC(c);

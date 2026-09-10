@@ -89,8 +89,8 @@ static lv_obj_t * make_cell(lv_obj_t * parent, const sym_item_t * it)
     lv_obj_set_style_bg_color(cell, lv_color_hex(0x2A2F3A), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(cell, 8, LV_PART_MAIN);
-    lv_obj_set_scrollable(cell, false);
-    lv_obj_set_clickable(cell, false);
+    lv_obj_set_flag(cell, LV_OBJ_FLAG_SCROLLABLE, false);
+    lv_obj_set_flag(cell, LV_OBJ_FLAG_CLICKABLE, false);
 
     /* 图标：用较大字号突出形状 */
     lv_obj_t * ico = lv_label_create(cell);
